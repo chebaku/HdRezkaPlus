@@ -1,12 +1,13 @@
 // ==UserScript==
-// @name         RezkaPlus Fetch Test
+// @name         RezkaPlus
 // @namespace    https://www.youtube.com/watch?v=dQw4w9WgXcQ
-// @version      0.2
-// @description  TEST: fetch iframe.cloud через прокси, ретрай до появления плееров, вставка оригинального HTML шелла
+// @version      1.2
+// @description  Встраивает iframe.cloud плеер через прокси на Rezka
 // @author       Cheba
 // @match        *://*.hdrezka.ag/*
 // @match        *://*.rezka.ag/*
 // @match        *://*.rezka.fi/*
+// @match        *://*.hdrezka.la/*
 // @grant        none
 // @run-at       document-end
 // ==/UserScript==
@@ -25,7 +26,20 @@
     const sleep = ms => new Promise(r => setTimeout(r, ms));
 
     const cleanAndStretch = () => {
-        const garbage = ['#vk_groups', '#vk_widget', '[id^="vkwidget"]', '#j90599c8fdd2fwp39y76g', '.b-sharing-social'];
+        const garbage = [
+            '[id^="brnd"]',
+            '[id^="ibrnd"]',
+            '[class^="brnd"]',
+            'iframe[src*="schulist.link"]',
+            '.b-post__social_holder_wrapper',
+            '.b-post__social_holder',
+            '.vk-group__header',
+            '.b-footer__social',
+            '#vk_groups',
+            '#vk_widget',
+            '[id^="vkwidget"]',
+            '.b-sharing-social'
+        ];
         garbage.forEach(s => document.querySelectorAll(s).forEach(el => el.remove()));
 
         const contentTable = document.querySelector('.b-content__columns');
@@ -49,15 +63,8 @@
                 const resp = await fetch(PROXY_URL + 'https://iframe.cloud/iframe/' + id);
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 const html = await resp.text();
-                const n = countPlayers(html);
-                if (n > 0) {
-                    console.log('Fetch test: got shell with ' + n + ' players');
-                    return html;
-                }
-                console.log('Fetch test: attempt ' + (attempt + 1) + ' -> empty player list');
-            } catch (e) {
-                console.log('Fetch test: attempt ' + (attempt + 1) + ' -> error: ' + e.message);
-            }
+                if (countPlayers(html) > 0) return html;
+            } catch (e) {}
             const delay = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
             await sleep(delay);
         }
@@ -81,7 +88,6 @@
             const encoded = helpLink.href.split('/help/')[1].replace(/\/$/, "");
             id = decodeURIComponent(atob(encoded)).match(/film\/(\d+)\//)[1];
         } catch (e) {
-            console.log('Fetch test: failed to decode film id', e);
             return;
         }
 
@@ -91,7 +97,7 @@
 
         const header = document.createElement('div');
         header.style.cssText = 'padding:8px 15px;background:linear-gradient(90deg,#ff00c8,#8a6bff,#4da3ff,#14c8d4);color:#fff;font-weight:800;font-size:14px;letter-spacing:0.5px;text-transform:uppercase;display:flex;align-items:center;justify-content:space-between';
-        header.innerHTML = 'CHEBAREZKA PLAYER (FETCH TEST) <span style="display:flex;align-items:center;gap:10px"><span id="frkp-status" style="font-weight:600;font-size:12px"></span><span id="frkp-reload" style="cursor:pointer;font-size:18px;line-height:1;user-select:none" title="Загрузить заново">↻</span></span>';
+        header.innerHTML = 'CHEBAREZKA PLAYER <span style="display:flex;align-items:center;gap:10px"><span id="frkp-status" style="font-weight:600;font-size:12px"></span><span id="frkp-reload" style="cursor:pointer;font-size:18px;line-height:1;user-select:none" title="Загрузить заново">↻</span></span>';
 
         const iframe = document.createElement('iframe');
         iframe.id = 'frkp-frame';
@@ -131,7 +137,6 @@
 
             if (!html) {
                 setStatus('Ошибка: нет плееров');
-                console.log('Fetch test: all attempts failed, no players');
                 return;
             }
 
