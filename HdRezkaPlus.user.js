@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         RezkaPlus
 // @namespace    https://www.youtube.com/watch?v=dQw4w9WgXcQ
-// @version      1.2
+// @version      1.3
 // @description  Встраивает iframe.cloud плеер через прокси на Rezka
 // @author       Cheba
 // @match        *://*.hdrezka.ag/*
@@ -31,8 +31,13 @@
             '[id^="ibrnd"]',
             '[class^="brnd"]',
             'iframe[src*="schulist.link"]',
+            '.wide.b-dwnapp',
+            '.b-content__main > div[style^="height: 250px"]',
+            '.b-content__main > div[id]:not([class]):empty',
+            '.tooltipstered.hd-tooltip.b-post__support_holder_report',
             '.b-post__social_holder_wrapper',
             '.b-post__social_holder',
+            '.vk-group',
             '.vk-group__header',
             '.b-footer__social',
             '#vk_groups',
@@ -41,6 +46,10 @@
             '.b-sharing-social'
         ];
         garbage.forEach(s => document.querySelectorAll(s).forEach(el => el.remove()));
+
+        if (document.body.classList.contains('has-brand')) {
+            document.body.style.setProperty('padding-top', '0', 'important');
+        }
 
         const contentTable = document.querySelector('.b-content__columns');
         if (contentTable) {
@@ -97,7 +106,7 @@
 
         const header = document.createElement('div');
         header.style.cssText = 'padding:8px 15px;background:linear-gradient(90deg,#ff00c8,#8a6bff,#4da3ff,#14c8d4);color:#fff;font-weight:800;font-size:14px;letter-spacing:0.5px;text-transform:uppercase;display:flex;align-items:center;justify-content:space-between';
-        header.innerHTML = 'CHEBAREZKA PLAYER <span style="display:flex;align-items:center;gap:10px"><span id="frkp-status" style="font-weight:600;font-size:12px"></span><span id="frkp-reload" style="cursor:pointer;font-size:18px;line-height:1;user-select:none" title="Загрузить заново">↻</span></span>';
+        header.innerHTML = 'HDREZKA PLUS <span style="display:flex;align-items:center;gap:10px"><span id="frkp-status" style="font-weight:600;font-size:12px"></span><span id="frkp-reload" style="cursor:pointer;font-size:18px;line-height:1;user-select:none" title="Загрузить заново">↻</span></span>';
 
         const iframe = document.createElement('iframe');
         iframe.id = 'frkp-frame';
