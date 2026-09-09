@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         RezkaPlus
+// @name         RezkaPlus TEST
 // @namespace    https://www.youtube.com/watch?v=dQw4w9WgXcQ
 // @version      1.3
 // @description  Встраивает iframe.cloud плеер через прокси на Rezka
