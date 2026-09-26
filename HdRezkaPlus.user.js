@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         RezkaPlus TEST
+// @name         RezkaPlus TEST Optimized
 // @namespace    https://www.youtube.com/watch?v=dQw4w9WgXcQ
 // @version      1.4
 // @description  Встраивает iframe.cloud плеер через прокси на Rezka
@@ -9,39 +9,73 @@
 // @match        *://*.rezka.fi/*
 // @match        *://*.hdrezka.la/*
 // @grant        none
-// @run-at       document-end
+// @run-at       document-start
 // ==/UserScript==
 
 (function() {
     'use strict';
 
     const PROXY_URL = 'https://proxy4.rte.net.ru/';
+    const EXTERNAL_IDS_URL = 'https://akter-black.com/externalids';
     const MAX_ATTEMPTS = 10;
     const BACKOFF_MS = [500, 1000, 2000, 4000];
     const FETCH_TIMEOUT_MS = 10000;
     const OBSERVER_DELAY_MS = 250;
     const GARBAGE_SELECTOR = [
-        '[id^="brnd"]', '[id^="ibrnd"]', '[class^="brnd"]',
+        '[id^="brnd"]',
+        '[id^="ibrnd"]',
+        '[class^="brnd"]',
         'iframe[src*="schulist.link"]',
+        'div[style*="position: fixed"]:has(img[src*="schulist.link"])',
         '#player.b-player > a[href^="/help/"][style*="background-image"]',
         '.wide.b-dwnapp',
         '.b-content__main > div[style^="height: 250px"]',
         '.b-content__main > div[id]:not([class]):empty',
         '.b-post__support_holder',
         '.tooltipstered.hd-tooltip.b-post__support_holder_report',
-        '.b-post__social_holder_wrapper', '.b-post__social_holder',
-        '.vk-group', '.vk-group__header', '.b-footer__social',
-        '#vk_groups', '#vk_widget', '[id^="vkwidget"]', '.b-sharing-social'
+        '.b-post__social_holder_wrapper',
+        '.b-post__social_holder',
+        '.vk-group',
+        '.vk-group__header',
+        '.b-footer__social',
+        '#vk_groups',
+        '#vk_widget',
+        '[id^="vkwidget"]',
+        '.b-sharing-social'
     ].join(',');
 
     const style = document.createElement('style');
-    style.textContent = '@keyframes frkp-spin{to{transform:rotate(360deg)}}@keyframes frkp-fadeout{from{opacity:1}to{opacity:0}}';
-    document.head.appendChild(style);
+    style.textContent = `${GARBAGE_SELECTOR}{display:none!important;visibility:hidden!important}@keyframes frkp-spin{to{transform:rotate(360deg)}}@keyframes frkp-fadeout{from{opacity:1}to{opacity:0}}`;
+    (document.head || document.documentElement).appendChild(style);
 
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+    const fetchWithTimeout = async (url, signal, options = {}) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        const abort = () => controller.abort();
+        signal.addEventListener('abort', abort, { once: true });
+        try {
+            return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+        } finally {
+            clearTimeout(timeout);
+            signal.removeEventListener('abort', abort);
+        }
+    };
+
+    const stopAndRemove = el => {
+        const media = el.matches('video, audio') ? [el] : el.querySelectorAll('video, audio');
+        media.forEach(player => {
+            player.pause();
+            player.removeAttribute('src');
+            player.load();
+        });
+        el.remove();
+    };
+
     const cleanAndStretch = () => {
-        document.querySelectorAll(GARBAGE_SELECTOR).forEach(el => el.remove());
+        document.querySelectorAll(GARBAGE_SELECTOR).forEach(stopAndRemove);
+
         document.querySelectorAll('#player a, #player button').forEach(el => {
             if (!/^Перейти на Premium\b/.test(el.textContent.trim())) return;
             const wrapper = el.parentElement;
@@ -51,6 +85,7 @@
         if (document.body.classList.contains('has-brand')) {
             document.body.style.setProperty('padding-top', '0', 'important');
         }
+
         const contentTable = document.querySelector('.b-content__columns');
         if (contentTable) {
             contentTable.style.width = '100%';
@@ -68,15 +103,31 @@
         return Boolean(doc.querySelector('#cinemaplayerItems .cinemaplayer-item-select[data-value]'));
     };
 
-    const getFilmId = () => {
-        const helpLink = document.querySelector('a[href*="/help/aHR0cHMlM0ElMkYlMkZ3d3cua2lub3BvaXNrLnJ1"]');
-        if (!helpLink) return null;
+    const getPageIds = () => {
+        const ids = { kinopoiskId: null, imdbId: null };
+        document.querySelectorAll('a[href*="/help/"]').forEach(link => {
+            try {
+                const encoded = link.href.split('/help/')[1]?.replace(/\/$/, '');
+                const decoded = encoded && decodeURIComponent(atob(encoded));
+                if (!decoded) return;
+                ids.kinopoiskId ||= decoded.match(/kinopoisk\.[^/]+\/film\/(\d+)/i)?.[1] || null;
+                ids.imdbId ||= decoded.match(/imdb\.com\/title\/(tt\d+)/i)?.[1] || null;
+            } catch (error) {
+                // На странице могут быть служебные help-ссылки с другим форматом.
+            }
+        });
+        return ids;
+    };
+
+    const resolveKinopoiskId = async (imdbId, serial, signal) => {
         try {
-            const encoded = helpLink.href.split('/help/')[1]?.replace(/\/$/, '');
-            const decoded = encoded && decodeURIComponent(atob(encoded));
-            return decoded?.match(/film\/(\d+)\//)?.[1] || null;
+            const url = EXTERNAL_IDS_URL + '?imdb_id=' + encodeURIComponent(imdbId) + '&serial=' + (serial ? 1 : 0);
+            const response = await fetchWithTimeout(url, signal);
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            const json = await response.json();
+            return json.kinopoisk_id ? String(json.kinopoisk_id) : null;
         } catch (error) {
-            console.debug('RezkaPlus: не удалось получить ID фильма', error);
+            if (!signal.aborted) console.debug('RezkaPlus: IMDb → Kinopoisk не удался', error);
             return null;
         }
     };
@@ -84,24 +135,14 @@
     const fetchShell = async (id, onStatus, signal) => {
         for (let attempt = 0; attempt < MAX_ATTEMPTS && !signal.aborted; attempt++) {
             onStatus('Поиск плееров...');
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-            const abort = () => controller.abort();
-            signal.addEventListener('abort', abort, { once: true });
-
             try {
-                const response = await fetch(PROXY_URL + 'https://iframe.cloud/iframe/' + id, {
-                    signal: controller.signal
-                });
+                const response = await fetchWithTimeout(PROXY_URL + 'https://iframe.cloud/iframe/' + id, signal);
                 if (!response.ok) throw new Error('HTTP ' + response.status);
                 const html = await response.text();
                 if (hasPlayers(html)) return html;
                 console.debug(`RezkaPlus: попытка ${attempt + 1} — плееры не найдены`);
             } catch (error) {
                 if (!signal.aborted) console.debug(`RezkaPlus: попытка ${attempt + 1} не удалась`, error);
-            } finally {
-                clearTimeout(timeout);
-                signal.removeEventListener('abort', abort);
             }
 
             if (attempt < MAX_ATTEMPTS - 1 && !signal.aborted) {
@@ -114,10 +155,13 @@
     const injectPlayer = () => {
         if (document.getElementById('frkp-embedded')) return;
 
-        const id = getFilmId();
-        if (!id) return;
-        const player = document.querySelector('.b-player') || document.querySelector('#main-player') ||
-            document.querySelector('[data-player]') || document.querySelector('.video-player');
+        const { kinopoiskId: directId, imdbId } = getPageIds();
+        if (!directId && !imdbId) return;
+
+        const player = document.querySelector('.b-player') ||
+            document.querySelector('#main-player') ||
+            document.querySelector('[data-player]') ||
+            document.querySelector('.video-player');
         if (!player) return;
 
         const container = document.createElement('div');
@@ -132,6 +176,7 @@
         iframe.id = 'frkp-frame';
         iframe.style.cssText = 'width:100%;height:480px;border:none;display:block;background:#000';
         iframe.allowFullscreen = true;
+
         container.append(header, iframe);
         player.parentNode.insertBefore(container, player.nextSibling);
 
@@ -139,10 +184,12 @@
         const reloadIcon = document.getElementById('frkp-reload');
         let loadController = null;
         let loadNumber = 0;
+
         const setStatus = text => {
             statusEl.style.animation = '';
             statusEl.textContent = text;
         };
+
         const flashOK = () => {
             setStatus('С КАЙФОМ!');
             statusEl.style.animation = 'frkp-fadeout 2s ease forwards';
@@ -151,6 +198,7 @@
                 statusEl.style.animation = '';
             }, 2000);
         };
+
         const load = async () => {
             const currentLoad = ++loadNumber;
             loadController?.abort();
@@ -158,15 +206,29 @@
             iframe.srcdoc = '';
             iframe.style.display = 'none';
             reloadIcon.style.animation = 'frkp-spin 0.6s linear infinite';
+            let id = directId;
+            if (!id) {
+                setStatus('Поиск Kinopoisk ID по IMDb...');
+                id = await resolveKinopoiskId(imdbId, /\/series\//i.test(location.pathname), loadController.signal);
+            }
+            if (currentLoad !== loadNumber) return;
+            if (!id) {
+                reloadIcon.style.animation = '';
+                setStatus('Ошибка: Kinopoisk ID не найден');
+                return;
+            }
+
             setStatus('Поиск плееров...');
 
             const html = await fetchShell(id, setStatus, loadController.signal);
             if (currentLoad !== loadNumber) return;
+
             reloadIcon.style.animation = '';
             if (!html) {
                 setStatus('Ошибка: нет плееров');
                 return;
             }
+
             iframe.srcdoc = html;
             iframe.style.display = 'block';
             flashOK();
@@ -181,11 +243,19 @@
         injectPlayer();
     };
 
-    run();
-    let observerTimer;
-    const observer = new MutationObserver(() => {
-        clearTimeout(observerTimer);
-        observerTimer = setTimeout(run, OBSERVER_DELAY_MS);
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+    const start = () => {
+        run();
+        let observerTimer;
+        const observer = new MutationObserver(() => {
+            clearTimeout(observerTimer);
+            observerTimer = setTimeout(run, OBSERVER_DELAY_MS);
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    };
+
+    if (document.body) {
+        start();
+    } else {
+        document.addEventListener('DOMContentLoaded', start, { once: true });
+    }
 })();
